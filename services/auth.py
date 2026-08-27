@@ -1,3 +1,7 @@
+from fastapi import HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+security = HTTPBearer()
+
 from datetime import datetime, timedelta, timezone
 
 from jose import jwt
@@ -75,3 +79,32 @@ def decode_access_token(
         SECRET_KEY,
         algorithms=[ALGORITHM],
     )
+
+
+def get_current_candidate(
+    credentials: HTTPAuthorizationCredentials,
+):
+
+    token = credentials.credentials
+
+    try:
+
+        payload = decode_access_token(token)
+
+        candidate_id = payload.get("sub")
+
+        if not candidate_id:
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication token.",
+            )
+
+        return candidate_id
+
+    except Exception:
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired authentication token.",
+        )

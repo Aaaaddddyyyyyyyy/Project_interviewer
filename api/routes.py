@@ -1,10 +1,21 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+)
+
 from langgraph.types import Command
 
 from graph.interview_graph import interview_graph
 
 from db.database import get_session
-from db.models import Candidate, Interview, InterviewAnswer
+from db.models import (
+    Candidate,
+    Interview,
+    InterviewAnswer,
+)
+
+from services.auth import get_current_candidate
 
 
 router = APIRouter(
@@ -19,40 +30,46 @@ router = APIRouter(
 
 @router.post("/start")
 def start_interview(
-    candidate_id: str,
     role: str = "AI Engineer",
     difficulty: str = "Medium",
     interview_type: str = "Technical",
     max_rounds: int = 3,
+    current_candidate: str = Depends(
+        get_current_candidate
+    ),
 ):
 
     session = get_session()
 
     try:
 
+        # JWT determines the candidate identity.
+        # The frontend no longer supplies candidate_id.
+
+        candidate_id = current_candidate
+
         # ----------------------------------------------------
-        # 1. Find or create candidate
+        # Find candidate
         # ----------------------------------------------------
 
         candidate = (
             session.query(Candidate)
             .filter(
-                Candidate.candidate_id == candidate_id
+                Candidate.candidate_id
+                == candidate_id
             )
             .first()
         )
 
         if not candidate:
 
-            candidate = Candidate(
-                candidate_id=candidate_id
+            raise HTTPException(
+                status_code=404,
+                detail="Candidate not found.",
             )
 
-            session.add(candidate)
-            session.commit()
-
         # ----------------------------------------------------
-        # 2. Create a NEW interview
+        # Create new interview
         # ----------------------------------------------------
 
         interview = Interview(
@@ -71,8 +88,7 @@ def start_interview(
         session.refresh(interview)
 
         # ----------------------------------------------------
-        # 3. IMPORTANT:
-        #    Each interview gets its own LangGraph thread
+        # Each interview gets its own LangGraph thread
         # ----------------------------------------------------
 
         config = {
@@ -82,7 +98,7 @@ def start_interview(
         }
 
         # ----------------------------------------------------
-        # 4. Initial LangGraph state
+        # Initial LangGraph state
         # ----------------------------------------------------
 
         initial_state = {
@@ -103,33 +119,48 @@ def start_interview(
         }
 
         # ----------------------------------------------------
-        # 5. Start LangGraph
+        # Start graph
         # ----------------------------------------------------
 
         result = interview_graph.invoke(
             initial_state,
-            config=config
+            config=config,
         )
 
         return {
 
-            "candidate_id": candidate_id,
+            "candidate_id":
+                candidate_id,
 
-            "interview_id": interview.id,
+            "interview_id":
+                interview.id,
 
-            "thread_id": str(interview.id),
+            "thread_id":
+                str(interview.id),
 
-            "question": result["question"],
+            "question":
+                result.get(
+                    "question",
+                    "",
+                ),
 
-            "round": result["round"],
+            "round":
+                result.get(
+                    "round",
+                    1,
+                ),
 
-            "role": role,
+            "role":
+                role,
 
-            "difficulty": difficulty,
+            "difficulty":
+                difficulty,
 
-            "interview_type": interview_type,
+            "interview_type":
+                interview_type,
 
-            "max_rounds": max_rounds,
+            "max_rounds":
+                max_rounds,
         }
 
     finally:
@@ -143,23 +174,32 @@ def start_interview(
 
 @router.post("/answer")
 def submit_answer(
-    candidate_id: str,
     answer: str,
+    current_candidate: str = Depends(
+        get_current_candidate
+    ),
 ):
 
     session = get_session()
 
     try:
 
+        # JWT determines candidate identity.
+
+        candidate_id = current_candidate
+
         # ----------------------------------------------------
-        # 1. Find latest active interview
+        # Find latest active interview
         # ----------------------------------------------------
 
         interview = (
             session.query(Interview)
             .filter(
-                Interview.candidate_id == candidate_id,
-                Interview.status == "in_progress",
+                Interview.candidate_id
+                == candidate_id,
+
+                Interview.status
+                == "in_progress",
             )
             .order_by(
                 Interview.id.desc()
@@ -175,31 +215,34 @@ def submit_answer(
             )
 
         # ----------------------------------------------------
-        # 2. Use interview ID as LangGraph thread ID
+        # LangGraph thread
         # ----------------------------------------------------
 
         config = {
             "configurable": {
-                "thread_id": str(interview.id)
+                "thread_id":
+                    str(interview.id)
             }
         }
 
         # ----------------------------------------------------
-        # 3. Resume LangGraph
+        # Resume graph with candidate answer
         # ----------------------------------------------------
 
         result = interview_graph.invoke(
-            Command(resume=answer),
-            config=config
+            Command(
+                resume=answer
+            ),
+            config=config,
         )
 
         # ----------------------------------------------------
-        # 4. Get latest history entry
+        # Get history
         # ----------------------------------------------------
 
         history = result.get(
             "history",
-            []
+            [],
         )
 
         feedback = ""
@@ -211,54 +254,61 @@ def submit_answer(
 
             question = latest.get(
                 "question",
-                ""
+                "",
             )
 
             feedback = latest.get(
                 "feedback",
-                ""
+                "",
             )
 
         # ----------------------------------------------------
-        # 5. Determine answered round
+        # Current round
         # ----------------------------------------------------
 
         current_round = result.get(
             "round",
-            1
+            1,
         )
 
         answered_round = max(
             current_round - 1,
-            1
+            1,
         )
 
         # ----------------------------------------------------
-        # 6. Save answer
+        # Save answer
         # ----------------------------------------------------
 
         interview_answer = InterviewAnswer(
 
-            interview_id=interview.id,
+            interview_id=
+                interview.id,
 
-            round=answered_round,
+            round=
+                answered_round,
 
-            question=question,
+            question=
+                question,
 
-            answer=answer,
+            answer=
+                answer,
 
-            feedback=feedback,
+            feedback=
+                feedback,
         )
 
-        session.add(interview_answer)
+        session.add(
+            interview_answer
+        )
 
         # ----------------------------------------------------
-        # 7. Check completion
+        # Check completion
         # ----------------------------------------------------
 
         max_rounds = result.get(
             "max_rounds",
-            interview.max_rounds
+            interview.max_rounds,
         )
 
         completed = (
@@ -272,7 +322,7 @@ def submit_answer(
             interview.final_report = (
                 result.get(
                     "final_report",
-                    ""
+                    "",
                 )
             )
 
@@ -298,12 +348,12 @@ def submit_answer(
                 "final_report":
                     result.get(
                         "final_report",
-                        ""
+                        "",
                     ),
             }
 
         # ----------------------------------------------------
-        # 8. Continue interview
+        # Continue interview
         # ----------------------------------------------------
 
         session.commit()
@@ -328,7 +378,7 @@ def submit_answer(
             "next_question":
                 result.get(
                     "question",
-                    ""
+                    "",
                 ),
         }
 
@@ -343,22 +393,42 @@ def submit_answer(
 
 @router.get("/resume/{candidate_id}")
 def resume_interview(
-    candidate_id: str
+    candidate_id: str,
+    current_candidate: str = Depends(
+        get_current_candidate
+    ),
 ):
+
+    # --------------------------------------------------------
+    # Security check
+    # --------------------------------------------------------
+
+    if candidate_id != current_candidate:
+
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You cannot resume another "
+                "candidate's interview."
+            ),
+        )
 
     session = get_session()
 
     try:
 
         # ----------------------------------------------------
-        # 1. Find latest active interview
+        # Find latest active interview
         # ----------------------------------------------------
 
         interview = (
             session.query(Interview)
             .filter(
-                Interview.candidate_id == candidate_id,
-                Interview.status == "in_progress",
+                Interview.candidate_id
+                == current_candidate,
+
+                Interview.status
+                == "in_progress",
             )
             .order_by(
                 Interview.id.desc()
@@ -378,17 +448,18 @@ def resume_interview(
             }
 
         # ----------------------------------------------------
-        # 2. Use interview ID as thread ID
+        # LangGraph thread
         # ----------------------------------------------------
 
         config = {
             "configurable": {
-                "thread_id": str(interview.id)
+                "thread_id":
+                    str(interview.id)
             }
         }
 
         # ----------------------------------------------------
-        # 3. Retrieve saved LangGraph state
+        # Retrieve saved state
         # ----------------------------------------------------
 
         state = interview_graph.get_state(
@@ -407,7 +478,7 @@ def resume_interview(
             }
 
         # ----------------------------------------------------
-        # 4. Return saved interview information
+        # Return saved state
         # ----------------------------------------------------
 
         return {
@@ -422,7 +493,7 @@ def resume_interview(
                 str(interview.id),
 
             "candidate_id":
-                candidate_id,
+                current_candidate,
 
             "role":
                 interview.role,
@@ -458,8 +529,25 @@ def resume_interview(
 
 @router.get("/history/{candidate_id}")
 def get_interview_history(
-    candidate_id: str
+    candidate_id: str,
+    current_candidate: str = Depends(
+        get_current_candidate
+    ),
 ):
+
+    # --------------------------------------------------------
+    # Security check
+    # --------------------------------------------------------
+
+    if candidate_id != current_candidate:
+
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You cannot access another "
+                "candidate's history."
+            ),
+        )
 
     session = get_session()
 
@@ -468,7 +556,8 @@ def get_interview_history(
         interviews = (
             session.query(Interview)
             .filter(
-                Interview.candidate_id == candidate_id
+                Interview.candidate_id
+                == current_candidate
             )
             .order_by(
                 Interview.id.desc()
@@ -526,6 +615,7 @@ def get_interview_history(
                 "answers": [
 
                     {
+
                         "round":
                             item.round,
 
@@ -546,7 +636,7 @@ def get_interview_history(
         return {
 
             "candidate_id":
-                candidate_id,
+                current_candidate,
 
             "interviews":
                 result,
@@ -567,7 +657,25 @@ def get_interview_history(
 def get_interview(
     candidate_id: str,
     interview_id: int,
+
+    current_candidate: str = Depends(
+        get_current_candidate
+    ),
 ):
+
+    # --------------------------------------------------------
+    # Security check
+    # --------------------------------------------------------
+
+    if candidate_id != current_candidate:
+
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You cannot access another "
+                "candidate's interview."
+            ),
+        )
 
     session = get_session()
 
@@ -576,8 +684,12 @@ def get_interview(
         interview = (
             session.query(Interview)
             .filter(
-                Interview.id == interview_id,
-                Interview.candidate_id == candidate_id,
+
+                Interview.id
+                == interview_id,
+
+                Interview.candidate_id
+                == current_candidate,
             )
             .first()
         )
@@ -635,6 +747,7 @@ def get_interview(
             "answers": [
 
                 {
+
                     "round":
                         item.round,
 
@@ -656,12 +769,33 @@ def get_interview(
 
         session.close()
 
+
 # ============================================================
 # CANDIDATE PROFILE
 # ============================================================
 
 @router.get("/candidate/{candidate_id}")
-def get_candidate(candidate_id: str):
+def get_candidate(
+    candidate_id: str,
+
+    current_candidate: str = Depends(
+        get_current_candidate
+    ),
+):
+
+    # --------------------------------------------------------
+    # Security check
+    # --------------------------------------------------------
+
+    if candidate_id != current_candidate:
+
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "You cannot access another "
+                "candidate's profile."
+            ),
+        )
 
     session = get_session()
 
@@ -670,7 +804,8 @@ def get_candidate(candidate_id: str):
         candidate = (
             session.query(Candidate)
             .filter(
-                Candidate.candidate_id == candidate_id
+                Candidate.candidate_id
+                == current_candidate
             )
             .first()
         )
@@ -683,11 +818,21 @@ def get_candidate(candidate_id: str):
             )
 
         return {
-            "id": candidate.id,
-            "candidate_id": candidate.candidate_id,
-            "created_at": candidate.created_at,
+
+            "id":
+                candidate.id,
+
+            "candidate_id":
+                candidate.candidate_id,
+
+            "email":
+                candidate.email,
+
+            "created_at":
+                candidate.created_at,
         }
 
     finally:
 
         session.close()
+
