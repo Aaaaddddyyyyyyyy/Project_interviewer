@@ -13,3 +13,26 @@ class CandidateResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RegisterRequest(BaseModel):
+
+    candidate_id: str
+
+    email: str
+
+    password: str
+
+
+class LoginRequest(BaseModel):
+
+    email: str
+
+    password: str
+
+
+class TokenResponse(BaseModel):
+
+    access_token: str
+
+    token_type: str
