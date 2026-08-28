@@ -11,7 +11,6 @@ import streamlit as st
 
 API_URL = "http://127.0.0.1:8000"
 
-
 st.set_page_config(
     page_title="AI Interviewer",
     page_icon="🎯",
@@ -24,33 +23,20 @@ st.set_page_config(
 # ============================================================
 
 DEFAULT_STATE = {
-
     "token": None,
-
     "candidate_id": "",
-
     "question": "",
-
     "round": 0,
-
     "feedback": "",
-
     "final_report": "",
-
     "started": False,
-
     "completed": False,
-
     "interview_id": None,
-
     "history": [],
 }
 
-
 for key, value in DEFAULT_STATE.items():
-
     if key not in st.session_state:
-
         st.session_state[key] = value
 
 
@@ -59,11 +45,9 @@ for key, value in DEFAULT_STATE.items():
 # ============================================================
 
 def get_auth_headers():
-
     token = st.session_state.get("token")
 
     if not token:
-
         return {}
 
     return {
@@ -72,22 +56,17 @@ def get_auth_headers():
 
 
 def decode_jwt_candidate_id(token):
-
     """
     Extract candidate_id from JWT payload.
 
-    The server still verifies the JWT.
-    This is only used by the frontend to know
-    which candidate is logged in.
+    This does NOT verify the JWT.
+    JWT verification is handled by the backend.
     """
 
     try:
-
         payload = token.split(".")[1]
 
-        padding = "=" * (
-            4 - len(payload) % 4
-        )
+        padding = "=" * (4 - len(payload) % 4)
 
         decoded = base64.urlsafe_b64decode(
             payload + padding
@@ -100,17 +79,47 @@ def decode_jwt_candidate_id(token):
         return data.get("sub", "")
 
     except Exception:
-
         return ""
 
 
-def logout():
+def handle_unauthorized():
+    st.session_state.token = None
+    st.session_state.candidate_id = ""
+    st.session_state.question = ""
+    st.session_state.round = 0
+    st.session_state.feedback = ""
+    st.session_state.final_report = ""
+    st.session_state.started = False
+    st.session_state.completed = False
+    st.session_state.interview_id = None
 
-    for key, value in DEFAULT_STATE.items():
-
-        st.session_state[key] = value
+    if "current_answer" in st.session_state:
+        del st.session_state.current_answer
 
     st.rerun()
+
+
+def logout():
+    for key, value in DEFAULT_STATE.items():
+        st.session_state[key] = value
+
+    if "current_answer" in st.session_state:
+        del st.session_state.current_answer
+
+    st.rerun()
+
+
+def reset_interview():
+    st.session_state.question = ""
+    st.session_state.round = 0
+    st.session_state.feedback = ""
+    st.session_state.final_report = ""
+    st.session_state.started = False
+    st.session_state.completed = False
+    st.session_state.interview_id = None
+
+    if "current_answer" in st.session_state:
+        del st.session_state.current_answer
 
 
 # ============================================================
@@ -132,7 +141,6 @@ if not st.session_state.token:
         ]
     )
 
-
     # ========================================================
     # LOGIN
     # ========================================================
@@ -152,7 +160,6 @@ if not st.session_state.token:
             type="password",
             key="login_password",
         )
-
 
         if st.button(
             "Login",
@@ -177,20 +184,13 @@ if not st.session_state.token:
                 try:
 
                     response = requests.post(
-
                         f"{API_URL}/auth/login",
-
                         json={
-                            "email":
-                                login_email,
-
-                            "password":
-                                login_password,
+                            "email": login_email.strip(),
+                            "password": login_password,
                         },
-
                         timeout=30,
                     )
-
 
                     if response.status_code == 200:
 
@@ -208,20 +208,31 @@ if not st.session_state.token:
 
                         else:
 
-                            st.session_state.token = token
-
-                            st.session_state.candidate_id = (
+                            candidate_id = (
                                 decode_jwt_candidate_id(
                                     token
                                 )
                             )
 
-                            st.success(
-                                "Login successful!"
-                            )
+                            if not candidate_id:
 
-                            st.rerun()
+                                st.error(
+                                    "Login succeeded, but candidate identity could not be read from the token."
+                                )
 
+                            else:
+
+                                st.session_state.token = token
+
+                                st.session_state.candidate_id = (
+                                    candidate_id
+                                )
+
+                                st.success(
+                                    "Login successful!"
+                                )
+
+                                st.rerun()
 
                     else:
 
@@ -240,13 +251,11 @@ if not st.session_state.token:
                             f"Login failed: {detail}"
                         )
 
-
                 except requests.RequestException as e:
 
                     st.error(
                         f"Could not connect to FastAPI: {e}"
                     )
-
 
     # ========================================================
     # REGISTRATION
@@ -279,7 +288,6 @@ if not st.session_state.token:
             type="password",
             key="register_password_confirm",
         )
-
 
         if st.button(
             "Create Account",
@@ -322,24 +330,14 @@ if not st.session_state.token:
                 try:
 
                     response = requests.post(
-
                         f"{API_URL}/auth/register",
-
                         json={
-
-                            "candidate_id":
-                                register_candidate_id,
-
-                            "email":
-                                register_email,
-
-                            "password":
-                                register_password,
+                            "candidate_id": register_candidate_id.strip(),
+                            "email": register_email.strip(),
+                            "password": register_password,
                         },
-
                         timeout=30,
                     )
-
 
                     if response.status_code == 200:
 
@@ -354,7 +352,7 @@ if not st.session_state.token:
                             st.session_state.token = token
 
                             st.session_state.candidate_id = (
-                                register_candidate_id
+                                register_candidate_id.strip()
                             )
 
                             st.success(
@@ -368,7 +366,6 @@ if not st.session_state.token:
                             st.error(
                                 "Account created but no token was returned."
                             )
-
 
                     else:
 
@@ -387,13 +384,11 @@ if not st.session_state.token:
                             f"Registration failed: {detail}"
                         )
 
-
                 except requests.RequestException as e:
 
                     st.error(
                         f"Could not connect to FastAPI: {e}"
                     )
-
 
     st.stop()
 
@@ -421,202 +416,46 @@ with st.sidebar:
         f"**ID:** {st.session_state.candidate_id}"
     )
 
+    st.divider()
+
     if st.button(
         "Logout",
         use_container_width=True,
     ):
-
         logout()
 
 
 # ============================================================
-# INTERVIEW CONFIGURATION
-# ============================================================
-
-st.subheader("Interview Setup")
-
-
-role = st.selectbox(
-    "Interview Role",
-    [
-        "AI Engineer",
-        "Python Developer",
-        "Data Scientist",
-        "Machine Learning Engineer",
-        "Backend Developer",
-    ],
-)
-
-
-difficulty = st.selectbox(
-    "Difficulty",
-    [
-        "Easy",
-        "Medium",
-        "Hard",
-    ],
-)
-
-
-interview_type = st.selectbox(
-    "Interview Type",
-    [
-        "Technical",
-        "System Design",
-        "Mixed",
-    ],
-)
-
-
-max_rounds = st.selectbox(
-    "Number of Rounds",
-    [
-        3,
-        5,
-        10,
-    ],
-)
-
-
-# ============================================================
-# START INTERVIEW
-# ============================================================
-
-if st.button(
-    "Start Interview",
-    type="primary",
-    use_container_width=True,
-):
-
-    try:
-
-        response = requests.post(
-
-            f"{API_URL}/interview/start",
-
-            params={
-
-                "role":
-                    role,
-
-                "difficulty":
-                    difficulty,
-
-                "interview_type":
-                    interview_type,
-
-                "max_rounds":
-                    max_rounds,
-            },
-
-            headers=get_auth_headers(),
-
-            timeout=120,
-        )
-
-
-        if response.status_code == 200:
-
-            data = response.json()
-
-            st.session_state.candidate_id = (
-                data.get(
-                    "candidate_id",
-                    st.session_state.candidate_id,
-                )
-            )
-
-            st.session_state.interview_id = (
-                data.get(
-                    "interview_id"
-                )
-            )
-
-            st.session_state.question = (
-                data.get(
-                    "question",
-                    "",
-                )
-            )
-
-            st.session_state.round = (
-                data.get(
-                    "round",
-                    1,
-                )
-            )
-
-            st.session_state.feedback = ""
-
-            st.session_state.final_report = ""
-
-            st.session_state.started = True
-
-            st.session_state.completed = False
-
-            st.rerun()
-
-
-        elif response.status_code == 401:
-
-            st.error(
-                "Your session has expired. Please log in again."
-            )
-
-            st.session_state.token = None
-
-            st.rerun()
-
-
-        else:
-
-            st.error(
-                f"API Error: {response.text}"
-            )
-
-
-    except requests.RequestException as e:
-
-        st.error(
-            f"Could not connect to FastAPI: {e}"
-        )
-
-
-# ============================================================
-# INTERVIEW
+# ACTIVE INTERVIEW
 # ============================================================
 
 if st.session_state.started:
 
     st.divider()
 
-    if not st.session_state.completed:
+    st.subheader(
+        f"Round {st.session_state.round}"
+    )
 
-        st.subheader(
-            f"Round {st.session_state.round}"
-        )
+    if st.session_state.question:
 
         st.markdown(
             f"### {st.session_state.question}"
         )
 
+    if not st.session_state.completed:
+
         answer = st.text_area(
-
             "Your Answer",
-
             height=200,
-
-            placeholder=(
-                "Type your technical answer here..."
-            ),
-
+            placeholder="Type your technical answer here...",
             key="current_answer",
         )
-
 
         if st.button(
             "Submit Answer",
             type="primary",
+            use_container_width=True,
         ):
 
             if not answer.strip():
@@ -630,19 +469,13 @@ if st.session_state.started:
                 try:
 
                     response = requests.post(
-
                         f"{API_URL}/interview/answer",
-
                         params={
-                            "answer":
-                                answer,
+                            "answer": answer.strip(),
                         },
-
                         headers=get_auth_headers(),
-
                         timeout=120,
                     )
-
 
                     if response.status_code == 200:
 
@@ -655,10 +488,7 @@ if st.session_state.started:
                             )
                         )
 
-
-                        if data.get(
-                            "completed"
-                        ):
+                        if data.get("completed"):
 
                             st.session_state.completed = True
 
@@ -668,7 +498,6 @@ if st.session_state.started:
                                     "",
                                 )
                             )
-
 
                         else:
 
@@ -686,9 +515,10 @@ if st.session_state.started:
                                 )
                             )
 
+                        if "current_answer" in st.session_state:
+                            del st.session_state.current_answer
 
                         st.rerun()
-
 
                     elif response.status_code == 401:
 
@@ -696,17 +526,14 @@ if st.session_state.started:
                             "Your session has expired. Please log in again."
                         )
 
-                        st.session_state.token = None
-
-                        st.rerun()
-
+                        handle_unauthorized()
 
                     else:
 
                         st.error(
-                            f"API Error: {response.text}"
+                            f"API Error {response.status_code}: "
+                            f"{response.text}"
                         )
-
 
                 except requests.RequestException as e:
 
@@ -746,7 +573,6 @@ if st.session_state.completed:
         "Final Interview Report"
     )
 
-
     if st.session_state.final_report:
 
         st.markdown(
@@ -759,132 +585,126 @@ if st.session_state.completed:
             "Final report was not returned by the API."
         )
 
-
-# ============================================================
-# NEW INTERVIEW
-# ============================================================
-
-if st.session_state.completed:
-
     st.divider()
 
     if st.button(
-        "Start New Interview"
+        "Start New Interview",
+        use_container_width=True,
     ):
 
-        st.session_state.question = ""
-
-        st.session_state.round = 0
-
-        st.session_state.feedback = ""
-
-        st.session_state.final_report = ""
-
-        st.session_state.started = False
-
-        st.session_state.completed = False
-
-        st.session_state.interview_id = None
-
-        if "current_answer" in st.session_state:
-
-            del st.session_state.current_answer
+        reset_interview()
 
         st.rerun()
 
 
 # ============================================================
-# RESUME INTERVIEW
+# START NEW INTERVIEW
 # ============================================================
 
-st.divider()
+if not st.session_state.started:
 
-st.header("🔄 Resume Interview")
+    st.divider()
 
+    st.subheader("Interview Setup")
 
-if st.button(
-    "Resume Interview"
-):
-
-    candidate_id = (
-        st.session_state.candidate_id
+    role = st.selectbox(
+        "Interview Role",
+        [
+            "AI Engineer",
+            "Python Developer",
+            "Data Scientist",
+            "Machine Learning Engineer",
+            "Backend Developer",
+        ],
     )
 
+    difficulty = st.selectbox(
+        "Difficulty",
+        [
+            "Easy",
+            "Medium",
+            "Hard",
+        ],
+    )
 
-    if not candidate_id:
+    interview_type = st.selectbox(
+        "Interview Type",
+        [
+            "Technical",
+            "System Design",
+            "Mixed",
+        ],
+    )
 
-        st.error(
-            "Candidate identity could not be determined from your login."
-        )
+    max_rounds = st.selectbox(
+        "Number of Rounds",
+        [
+            3,
+            5,
+            10,
+        ],
+    )
 
-    else:
+    if st.button(
+        "Start Interview",
+        type="primary",
+        use_container_width=True,
+    ):
 
         try:
 
-            response = requests.get(
-
-                f"{API_URL}/interview/resume/"
-                f"{candidate_id}",
-
+            response = requests.post(
+                f"{API_URL}/interview/start",
+                params={
+                    "role": role,
+                    "difficulty": difficulty,
+                    "interview_type": interview_type,
+                    "max_rounds": max_rounds,
+                },
                 headers=get_auth_headers(),
-
-                timeout=30,
+                timeout=120,
             )
-
 
             if response.status_code == 200:
 
                 data = response.json()
 
-
-                if data.get(
-                    "resume_available"
-                ):
-
-                    st.session_state.interview_id = (
-                        data.get(
-                            "interview_id"
-                        )
+                st.session_state.candidate_id = (
+                    data.get(
+                        "candidate_id",
+                        st.session_state.candidate_id,
                     )
+                )
 
-                    st.session_state.question = (
-                        data.get(
-                            "question",
-                            "",
-                        )
+                st.session_state.interview_id = (
+                    data.get(
+                        "interview_id"
                     )
+                )
 
-                    st.session_state.round = (
-                        data.get(
-                            "round",
-                            1,
-                        )
+                st.session_state.question = (
+                    data.get(
+                        "question",
+                        "",
                     )
+                )
 
-                    st.session_state.started = True
-
-                    st.session_state.completed = False
-
-                    st.session_state.feedback = ""
-
-                    st.session_state.final_report = ""
-
-                    st.success(
-                        "Interview resumed!"
+                st.session_state.round = (
+                    data.get(
+                        "round",
+                        1,
                     )
+                )
 
-                    st.rerun()
+                st.session_state.feedback = ""
 
+                st.session_state.final_report = ""
 
-                else:
+                st.session_state.started = True
 
-                    st.warning(
-                        data.get(
-                            "message",
-                            "No interview to resume.",
-                        )
-                    )
+                st.session_state.completed = False
 
+                st.rerun()
 
             elif response.status_code == 401:
 
@@ -892,30 +712,132 @@ if st.button(
                     "Your session has expired. Please log in again."
                 )
 
-                st.session_state.token = None
-
-                st.rerun()
-
-
-            elif response.status_code == 403:
-
-                st.error(
-                    "You are not authorized to access this interview."
-                )
-
+                handle_unauthorized()
 
             else:
 
                 st.error(
-                    f"API Error: {response.text}"
+                    f"API Error {response.status_code}: "
+                    f"{response.text}"
                 )
-
 
         except requests.RequestException as e:
 
             st.error(
-                f"Could not connect to API: {e}"
+                f"Could not connect to FastAPI: {e}"
             )
+
+
+# ============================================================
+# RESUME INTERVIEW
+# ============================================================
+
+if not st.session_state.started:
+
+    st.divider()
+
+    st.header("🔄 Resume Interview")
+
+    if st.button(
+        "Resume Interview",
+        use_container_width=True,
+    ):
+
+        candidate_id = (
+            st.session_state.candidate_id
+        )
+
+        if not candidate_id:
+
+            st.error(
+                "Candidate identity could not be determined from your login."
+            )
+
+        else:
+
+            try:
+
+                response = requests.get(
+                    f"{API_URL}/interview/resume/{candidate_id}",
+                    headers=get_auth_headers(),
+                    timeout=30,
+                )
+
+                if response.status_code == 200:
+
+                    data = response.json()
+
+                    if data.get("resume_available"):
+
+                        st.session_state.interview_id = (
+                            data.get(
+                                "interview_id"
+                            )
+                        )
+
+                        st.session_state.question = (
+                            data.get(
+                                "question",
+                                "",
+                            )
+                        )
+
+                        st.session_state.round = (
+                            data.get(
+                                "round",
+                                1,
+                            )
+                        )
+
+                        st.session_state.started = True
+
+                        st.session_state.completed = False
+
+                        st.session_state.feedback = ""
+
+                        st.session_state.final_report = ""
+
+                        st.success(
+                            "Interview resumed!"
+                        )
+
+                        st.rerun()
+
+                    else:
+
+                        st.warning(
+                            data.get(
+                                "message",
+                                "No interview to resume.",
+                            )
+                        )
+
+                elif response.status_code == 401:
+
+                    st.error(
+                        "Your session has expired. Please log in again."
+                    )
+
+                    handle_unauthorized()
+
+                elif response.status_code == 403:
+
+                    st.error(
+                        "You are not authorized to access this interview."
+                    )
+
+                else:
+
+                    st.error(
+                        f"API Error {response.status_code}: "
+                        f"{response.text}"
+                    )
+
+            except requests.RequestException as e:
+
+                st.error(
+                    f"Could not connect to FastAPI: {e}"
+                )
 
 
 # ============================================================
@@ -926,15 +848,14 @@ st.divider()
 
 st.header("📊 Interview History")
 
-
 if st.button(
-    "Load Interview History"
+    "Load Interview History",
+    use_container_width=True,
 ):
 
     candidate_id = (
         st.session_state.candidate_id
     )
-
 
     if not candidate_id:
 
@@ -947,15 +868,10 @@ if st.button(
         try:
 
             response = requests.get(
-
-                f"{API_URL}/interview/history/"
-                f"{candidate_id}",
-
+                f"{API_URL}/interview/history/{candidate_id}",
                 headers=get_auth_headers(),
-
                 timeout=30,
             )
-
 
             if response.status_code == 200:
 
@@ -966,61 +882,49 @@ if st.button(
                     [],
                 )
 
-
                 if not interviews:
 
                     st.info(
                         "No interview history found."
                     )
 
-
                 else:
 
                     for interview in interviews:
 
                         st.subheader(
-                            f"Interview "
-                            f"#{interview['interview_id']}"
+                            f"Interview #{interview['interview_id']}"
                         )
-
 
                         st.write(
-                            f"Role: "
-                            f"{interview['role']}"
+                            f"Role: {interview['role']}"
                         )
-
 
                         st.write(
-                            f"Difficulty: "
-                            f"{interview['difficulty']}"
+                            f"Difficulty: {interview['difficulty']}"
                         )
-
 
                         st.write(
-                            f"Type: "
-                            f"{interview['interview_type']}"
+                            f"Type: {interview['interview_type']}"
                         )
-
 
                         st.write(
-                            f"Status: "
-                            f"{interview['status']}"
+                            f"Status: {interview['status']}"
                         )
-
 
                         st.write(
-                            f"Rounds: "
-                            f"{interview['max_rounds']}"
+                            f"Rounds: {interview['max_rounds']}"
                         )
 
+                        answers = interview.get(
+                            "answers",
+                            [],
+                        )
 
-                        for item in interview[
-                            "answers"
-                        ]:
+                        for item in answers:
 
                             with st.expander(
-                                f"Round "
-                                f"{item['round']}"
+                                f"Round {item['round']}"
                             ):
 
                                 st.markdown(
@@ -1031,7 +935,6 @@ if st.button(
                                     item["question"]
                                 )
 
-
                                 st.markdown(
                                     "**Answer**"
                                 )
@@ -1040,33 +943,32 @@ if st.button(
                                     item["answer"]
                                 )
 
-
                                 st.markdown(
                                     "**AI Feedback**"
                                 )
 
                                 st.write(
-                                    item["feedback"]
+                                    item.get(
+                                        "feedback",
+                                        "",
+                                    )
                                 )
 
-
-                        if interview[
+                        final_report = interview.get(
                             "final_report"
-                        ]:
+                        )
+
+                        if final_report:
 
                             st.markdown(
                                 "### Final Report"
                             )
 
                             st.markdown(
-                                interview[
-                                    "final_report"
-                                ]
+                                final_report
                             )
 
-
                         st.divider()
-
 
             elif response.status_code == 401:
 
@@ -1074,10 +976,7 @@ if st.button(
                     "Your session has expired. Please log in again."
                 )
 
-                st.session_state.token = None
-
-                st.rerun()
-
+                handle_unauthorized()
 
             elif response.status_code == 403:
 
@@ -1085,17 +984,15 @@ if st.button(
                     "You are not authorized to access this history."
                 )
 
-
             else:
 
                 st.error(
-                    f"API Error: {response.text}"
+                    f"API Error {response.status_code}: "
+                    f"{response.text}"
                 )
-
 
         except requests.RequestException as e:
 
             st.error(
-                f"Could not connect to API: {e}"
+                f"Could not connect to FastAPI: {e}"
             )
-

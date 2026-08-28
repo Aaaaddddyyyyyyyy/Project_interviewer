@@ -1,51 +1,71 @@
-from fastapi import HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-security = HTTPBearer()
-
 from datetime import datetime, timedelta, timezone
-
-from jose import jwt
-from passlib.context import CryptContext
-
 import os
 
 from dotenv import load_dotenv
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from pwdlib import PasswordHash
+
+from db.database import get_session
+from db.models import Candidate
 
 
 load_dotenv()
 
 
-SECRET_KEY = os.getenv(
-    "JWT_SECRET_KEY",
-    "change-this-development-secret"
-)
+# ============================================================
+# PASSWORD HASHING
+# ============================================================
 
-ALGORITHM = "HS256"
-
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
-
-
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-)
+password_hash = PasswordHash.recommended()
 
 
 def hash_password(password: str) -> str:
-
-    return pwd_context.hash(password)
+    return password_hash.hash(password)
 
 
 def verify_password(
     plain_password: str,
-    password_hash: str,
+    hashed_password: str,
 ) -> bool:
-
-    return pwd_context.verify(
+    return password_hash.verify(
         plain_password,
-        password_hash,
+        hashed_password,
     )
 
+
+# ============================================================
+# JWT CONFIGURATION
+# ============================================================
+
+SECRET_KEY = os.getenv(
+    "JWT_SECRET_KEY",
+    "change-this-secret-key",
+)
+
+ALGORITHM = "HS256"
+
+ACCESS_TOKEN_EXPIRE_MINUTES = int(
+    os.getenv(
+        "ACCESS_TOKEN_EXPIRE_MINUTES",
+        "60",
+    )
+)
+
+
+# ============================================================
+# OAUTH2
+# ============================================================
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/auth/login"
+)
+
+
+# ============================================================
+# CREATE ACCESS TOKEN
+# ============================================================
 
 def create_access_token(
     candidate_id: str,
@@ -70,41 +90,79 @@ def create_access_token(
     )
 
 
+# ============================================================
+# DECODE ACCESS TOKEN
+# ============================================================
+
 def decode_access_token(
     token: str,
-):
-
-    return jwt.decode(
-        token,
-        SECRET_KEY,
-        algorithms=[ALGORITHM],
-    )
-
-
-def get_current_candidate(
-    credentials: HTTPAuthorizationCredentials,
-):
-
-    token = credentials.credentials
+) -> str | None:
 
     try:
 
-        payload = decode_access_token(token)
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+        )
 
         candidate_id = payload.get("sub")
 
         if not candidate_id:
-
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication token.",
-            )
+            return None
 
         return candidate_id
 
-    except Exception:
+    except JWTError:
+
+        return None
+
+
+# ============================================================
+# CURRENT CANDIDATE
+# ============================================================
+
+def get_current_candidate(
+    token: str = Depends(oauth2_scheme),
+):
+
+    candidate_id = decode_access_token(token)
+
+    if not candidate_id:
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired authentication token.",
+            detail="Invalid or expired token.",
+            headers={
+                "WWW-Authenticate": "Bearer"
+            },
         )
+
+    session = get_session()
+
+    try:
+
+        candidate = (
+            session.query(Candidate)
+            .filter(
+                Candidate.candidate_id
+                == candidate_id
+            )
+            .first()
+        )
+
+        if not candidate:
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Candidate not found.",
+                headers={
+                    "WWW-Authenticate": "Bearer"
+                },
+            )
+
+        return candidate
+
+    finally:
+
+        session.close()
