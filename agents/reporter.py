@@ -11,16 +11,16 @@ def generate_final_report(state: InterviewState):
     for item in history:
 
         interview_data += f"""
-Round {item["round"]}
+Round {item.get("round", "N/A")}
 
 Question:
-{item["question"]}
+{item.get("question", "")}
 
 Candidate Answer:
-{item["answer"]}
+{item.get("answer", "")}
 
 Evaluation:
-{item["feedback"]}
+{item.get("feedback", "")}
 
 -------------------------
 """
@@ -28,7 +28,8 @@ Evaluation:
     prompt = f"""
 You are a senior technical interviewer.
 
-Create a final assessment for the candidate.
+Create a final assessment for the candidate based ONLY on
+the interview history provided below.
 
 Candidate Role:
 {state.get("role", "Software Engineer")}
@@ -42,7 +43,7 @@ Difficulty:
 Interview History:
 {interview_data}
 
-Provide:
+Provide the assessment in exactly this structure:
 
 Overall Score: <score>/10
 
@@ -64,7 +65,11 @@ Areas for Improvement:
 Final Recommendation:
 <Strong Hire / Hire / Needs Improvement / Reject>
 
-Keep the assessment objective and concise.
+Rules:
+- Base the assessment only on the candidate's answers.
+- Do not invent achievements or experience.
+- Consider correctness, depth, reasoning, clarity, and completeness.
+- Keep the assessment objective and concise.
 """
 
     response = llm.invoke(prompt)
