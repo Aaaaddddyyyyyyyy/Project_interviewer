@@ -58,9 +58,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(
 # OAUTH2
 # ============================================================
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/auth/login"
-)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 # ============================================================
