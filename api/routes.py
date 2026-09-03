@@ -5,6 +5,7 @@ from graph.interview_graph import interview_graph
 from db.database import get_session
 from db.models import Candidate, Interview, InterviewAnswer
 from services.auth import get_current_candidate
+from services.video_analysis import analyze_video
 
 
 router = APIRouter(
@@ -156,10 +157,20 @@ def submit_answer(
             latest = history[-1]
 
             if isinstance(latest, dict):
-                question = latest.get("question", "")
-                feedback = latest.get("feedback", "")
+                question = latest.get(
+                    "question",
+                    ""
+                )
 
-        current_round = result.get("round", 1)
+                feedback = latest.get(
+                    "feedback",
+                    ""
+                )
+
+        current_round = result.get(
+            "round",
+            1
+        )
 
         answered_round = max(
             current_round - 1,
@@ -229,6 +240,126 @@ def submit_answer(
         )
 
     finally:
+        session.close()
+
+
+# ============================================================
+# VIDEO ANALYSIS
+# ============================================================
+
+@router.post("/video-analysis")
+def analyze_interview_video(
+    video_path: str,
+    current_candidate: Candidate = Depends(get_current_candidate),
+):
+    session = get_session()
+
+    try:
+
+        candidate_id = current_candidate.candidate_id
+
+        # ----------------------------------------------------
+        # Find active interview
+        # ----------------------------------------------------
+
+        interview = (
+            session.query(Interview)
+            .filter(
+                Interview.candidate_id == candidate_id,
+                Interview.status == "in_progress"
+            )
+            .order_by(Interview.id.desc())
+            .first()
+        )
+
+        if not interview:
+            raise HTTPException(
+                status_code=404,
+                detail="No active interview found."
+            )
+
+        # ----------------------------------------------------
+        # Validate video path
+        # ----------------------------------------------------
+
+        if not video_path:
+            raise HTTPException(
+                status_code=400,
+                detail="Video path is required."
+            )
+
+        # ----------------------------------------------------
+        # Run video analysis
+        # ----------------------------------------------------
+
+        analysis = analyze_video(
+            video_path
+        )
+
+        # ----------------------------------------------------
+        # Save video analysis
+        # ----------------------------------------------------
+
+        interview.video_path = analysis.get(
+            "video_path"
+        )
+
+        interview.video_duration_seconds = analysis.get(
+            "duration_seconds"
+        )
+
+        interview.video_fps = analysis.get(
+            "fps"
+        )
+
+        interview.video_width = analysis.get(
+            "width"
+        )
+
+        interview.video_height = analysis.get(
+            "height"
+        )
+
+        interview.video_analyzed_frames = analysis.get(
+            "analyzed_frames"
+        )
+
+        interview.face_detected_frames = analysis.get(
+            "face_detected_frames"
+        )
+
+        interview.face_visibility_percentage = analysis.get(
+            "face_visibility_percentage"
+        )
+
+        session.commit()
+
+        # ----------------------------------------------------
+        # Return analysis
+        # ----------------------------------------------------
+
+        return {
+            "candidate_id": candidate_id,
+            "interview_id": interview.id,
+            "video_analysis": analysis,
+        }
+
+    except HTTPException:
+
+        session.rollback()
+        raise
+
+    except Exception as e:
+
+        session.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Video analysis failed: {str(e)}"
+        )
+
+    finally:
+
         session.close()
 
 
@@ -356,7 +487,27 @@ def get_interview_history(
                 "max_rounds": interview.max_rounds,
                 "status": interview.status,
                 "final_report": interview.final_report,
+
+                "video_analysis": {
+                    "video_path": interview.video_path,
+                    "duration_seconds":
+                        interview.video_duration_seconds,
+                    "fps":
+                        interview.video_fps,
+                    "width":
+                        interview.video_width,
+                    "height":
+                        interview.video_height,
+                    "analyzed_frames":
+                        interview.video_analyzed_frames,
+                    "face_detected_frames":
+                        interview.face_detected_frames,
+                    "face_visibility_percentage":
+                        interview.face_visibility_percentage,
+                },
+
                 "created_at": interview.created_at,
+
                 "answers": [
                     {
                         "round": item.round,
@@ -431,7 +582,27 @@ def get_interview(
             "max_rounds": interview.max_rounds,
             "status": interview.status,
             "final_report": interview.final_report,
+
+            "video_analysis": {
+                "video_path": interview.video_path,
+                "duration_seconds":
+                    interview.video_duration_seconds,
+                "fps":
+                    interview.video_fps,
+                "width":
+                    interview.video_width,
+                "height":
+                    interview.video_height,
+                "analyzed_frames":
+                    interview.video_analyzed_frames,
+                "face_detected_frames":
+                    interview.face_detected_frames,
+                "face_visibility_percentage":
+                    interview.face_visibility_percentage,
+            },
+
             "created_at": interview.created_at,
+
             "answers": [
                 {
                     "round": item.round,

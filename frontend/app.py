@@ -1,8 +1,10 @@
 import base64
 import json
-
 import requests
 import streamlit as st
+
+from frontend.audio_recorder import record_and_transcribe
+from frontend.video_recorder import record_interview_video
 
 
 # ============================================================
@@ -33,10 +35,16 @@ DEFAULT_STATE = {
     "completed": False,
     "interview_id": None,
     "history": [],
+    "interview_audio_frames": [],
+    "interview_video_path": "",
+    "video_analysis": None,
 }
 
+
 for key, value in DEFAULT_STATE.items():
+
     if key not in st.session_state:
+
         st.session_state[key] = value
 
 
@@ -45,6 +53,7 @@ for key, value in DEFAULT_STATE.items():
 # ============================================================
 
 def get_auth_headers():
+
     token = st.session_state.get("token")
 
     if not token:
@@ -56,6 +65,7 @@ def get_auth_headers():
 
 
 def decode_jwt_candidate_id(token):
+
     """
     Extract candidate_id from JWT payload.
 
@@ -64,9 +74,12 @@ def decode_jwt_candidate_id(token):
     """
 
     try:
+
         payload = token.split(".")[1]
 
-        padding = "=" * (4 - len(payload) % 4)
+        padding = "=" * (
+            4 - len(payload) % 4
+        )
 
         decoded = base64.urlsafe_b64decode(
             payload + padding
@@ -79,10 +92,12 @@ def decode_jwt_candidate_id(token):
         return data.get("sub", "")
 
     except Exception:
+
         return ""
 
 
 def handle_unauthorized():
+
     st.session_state.token = None
     st.session_state.candidate_id = ""
     st.session_state.question = ""
@@ -92,24 +107,32 @@ def handle_unauthorized():
     st.session_state.started = False
     st.session_state.completed = False
     st.session_state.interview_id = None
+    st.session_state.interview_audio_frames = []
+    st.session_state.interview_video_path = ""
+    st.session_state.video_analysis = None
 
     if "current_answer" in st.session_state:
+
         del st.session_state.current_answer
 
     st.rerun()
 
 
 def logout():
+
     for key, value in DEFAULT_STATE.items():
+
         st.session_state[key] = value
 
     if "current_answer" in st.session_state:
+
         del st.session_state.current_answer
 
     st.rerun()
 
 
 def reset_interview():
+
     st.session_state.question = ""
     st.session_state.round = 0
     st.session_state.feedback = ""
@@ -117,9 +140,91 @@ def reset_interview():
     st.session_state.started = False
     st.session_state.completed = False
     st.session_state.interview_id = None
+    st.session_state.interview_audio_frames = []
+    st.session_state.interview_video_path = ""
+    st.session_state.video_analysis = None
 
     if "current_answer" in st.session_state:
+
         del st.session_state.current_answer
+
+    if "video_recording_id" in st.session_state:
+
+        del st.session_state.video_recording_id
+
+
+# ============================================================
+# VIDEO ANALYSIS HELPER
+# ============================================================
+
+def analyze_current_video():
+
+    video_path = st.session_state.get(
+        "interview_video_path",
+        ""
+    )
+
+    if not video_path:
+
+        return None
+
+    try:
+
+        response = requests.post(
+            f"{API_URL}/interview/video-analysis",
+            params={
+                "video_path": video_path
+            },
+            headers=get_auth_headers(),
+            timeout=180,
+        )
+
+        if response.status_code == 200:
+
+            data = response.json()
+
+            analysis = data.get(
+                "video_analysis",
+                {}
+            )
+
+            st.session_state.video_analysis = analysis
+
+            return analysis
+
+        if response.status_code == 401:
+
+            st.error(
+                "Your session has expired. Please log in again."
+            )
+
+            handle_unauthorized()
+
+            return None
+
+        st.error(
+            f"Video analysis failed "
+            f"(HTTP {response.status_code}): "
+            f"{response.text}"
+        )
+
+        return None
+
+    except requests.RequestException as e:
+
+        st.error(
+            f"Could not connect to FastAPI for video analysis: {e}"
+        )
+
+        return None
+
+    except Exception as e:
+
+        st.error(
+            f"Video analysis failed: {e}"
+        )
+
+        return None
 
 
 # ============================================================
@@ -256,6 +361,7 @@ if not st.session_state.token:
                     st.error(
                         f"Could not connect to FastAPI: {e}"
                     )
+
 
     # ========================================================
     # REGISTRATION
@@ -422,6 +528,7 @@ with st.sidebar:
         "Logout",
         use_container_width=True,
     ):
+
         logout()
 
 
@@ -443,7 +550,21 @@ if st.session_state.started:
             f"### {st.session_state.question}"
         )
 
+
     if not st.session_state.completed:
+
+        # ====================================================
+        # CAMERA RECORDING
+        # ====================================================
+
+        record_interview_video()
+
+        st.markdown("---")
+
+
+        # ====================================================
+        # TEXT ANSWER
+        # ====================================================
 
         answer = st.text_area(
             "Your Answer",
@@ -451,6 +572,56 @@ if st.session_state.started:
             placeholder="Type your technical answer here...",
             key="current_answer",
         )
+
+        st.markdown("---")
+
+
+        # ====================================================
+        # VOICE ANSWER
+        # ====================================================
+
+        record_and_transcribe()
+
+
+        # Get the latest answer after transcription.
+
+        answer = st.session_state.get(
+            "current_answer",
+            answer,
+        )
+
+        st.markdown("---")
+
+
+        # ====================================================
+        # VIDEO STATUS
+        # ====================================================
+
+        video_path = st.session_state.get(
+            "interview_video_path",
+            "",
+        )
+
+        if video_path:
+
+            st.success(
+                "🎥 Interview video is ready for analysis."
+            )
+
+            st.caption(
+                f"Video: {video_path}"
+            )
+
+        else:
+
+            st.info(
+                "🎥 No completed video recording detected yet."
+            )
+
+
+        # ====================================================
+        # SUBMIT ANSWER
+        # ====================================================
 
         if st.button(
             "Submit Answer",
@@ -461,10 +632,91 @@ if st.session_state.started:
             if not answer.strip():
 
                 st.warning(
-                    "Please enter an answer."
+                    "Please enter or record an answer."
                 )
 
             else:
+
+                # =================================================
+                # STEP 1 — ANALYZE VIDEO FIRST
+                # =================================================
+
+                video_path = st.session_state.get(
+                    "interview_video_path",
+                    "",
+                )
+
+                if video_path:
+
+                    st.info(
+                        "🎥 Analyzing your interview video..."
+                    )
+
+                    with st.spinner(
+                        "Running face and video analysis..."
+                    ):
+
+                        analysis = analyze_current_video()
+
+                    if analysis:
+
+                        st.success(
+                            "✅ Video analysis completed."
+                        )
+
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+
+                            st.metric(
+                                "Face Visibility",
+                                f"{analysis.get('face_visibility_percentage', 0)}%"
+                            )
+
+                            st.metric(
+                                "Video Duration",
+                                f"{analysis.get('duration_seconds', 0)} sec"
+                            )
+
+                            st.metric(
+                                "FPS",
+                                analysis.get("fps", 0)
+                            )
+
+                        with col2:
+
+                            st.metric(
+                                "Resolution",
+                                f"{analysis.get('width', 0)} × {analysis.get('height', 0)}"
+                            )
+
+                            st.metric(
+                                "Frames Analyzed",
+                                analysis.get(
+                                    "analyzed_frames",
+                                    0
+                                )
+                            )
+
+                            st.metric(
+                                "Face Detected Frames",
+                                analysis.get(
+                                    "face_detected_frames",
+                                    0
+                                )
+                            )
+
+                else:
+
+                    st.warning(
+                        "No video recording was found. "
+                        "The answer will still be submitted."
+                    )
+
+
+                # =================================================
+                # STEP 2 — SUBMIT ANSWER
+                # =================================================
 
                 try:
 
@@ -487,6 +739,7 @@ if st.session_state.started:
                                 "",
                             )
                         )
+
 
                         if data.get("completed"):
 
@@ -515,10 +768,36 @@ if st.session_state.started:
                                 )
                             )
 
+
+                        # Clear current answer.
+
                         if "current_answer" in st.session_state:
+
                             del st.session_state.current_answer
 
+
+                        # Clear recorded audio.
+
+                        st.session_state.interview_audio_frames = []
+
+
+                        # Clear video path for the next round.
+
+                        st.session_state.interview_video_path = ""
+
+                        st.session_state.video_analysis = None
+
+
+                        # Clear video recorder ID so a new
+                        # recording is created next round.
+
+                        if "video_recording_id" in st.session_state:
+
+                            del st.session_state.video_recording_id
+
+
                         st.rerun()
+
 
                     elif response.status_code == 401:
 
@@ -527,6 +806,7 @@ if st.session_state.started:
                         )
 
                         handle_unauthorized()
+
 
                     else:
 
@@ -584,6 +864,7 @@ if st.session_state.completed:
         st.warning(
             "Final report was not returned by the API."
         )
+
 
     st.divider()
 
@@ -645,6 +926,7 @@ if not st.session_state.started:
         ],
     )
 
+
     if st.button(
         "Start Interview",
         type="primary",
@@ -665,9 +947,11 @@ if not st.session_state.started:
                 timeout=120,
             )
 
+
             if response.status_code == 200:
 
                 data = response.json()
+
 
                 st.session_state.candidate_id = (
                     data.get(
@@ -676,11 +960,13 @@ if not st.session_state.started:
                     )
                 )
 
+
                 st.session_state.interview_id = (
                     data.get(
                         "interview_id"
                     )
                 )
+
 
                 st.session_state.question = (
                     data.get(
@@ -689,12 +975,14 @@ if not st.session_state.started:
                     )
                 )
 
+
                 st.session_state.round = (
                     data.get(
                         "round",
                         1,
                     )
                 )
+
 
                 st.session_state.feedback = ""
 
@@ -704,7 +992,22 @@ if not st.session_state.started:
 
                 st.session_state.completed = False
 
+                st.session_state.interview_audio_frames = []
+
+                st.session_state.interview_video_path = ""
+
+                st.session_state.video_analysis = None
+
+
+                # Clear previous video recording ID.
+
+                if "video_recording_id" in st.session_state:
+
+                    del st.session_state.video_recording_id
+
+
                 st.rerun()
+
 
             elif response.status_code == 401:
 
@@ -714,12 +1017,14 @@ if not st.session_state.started:
 
                 handle_unauthorized()
 
+
             else:
 
                 st.error(
                     f"API Error {response.status_code}: "
                     f"{response.text}"
                 )
+
 
         except requests.RequestException as e:
 
@@ -747,6 +1052,7 @@ if not st.session_state.started:
             st.session_state.candidate_id
         )
 
+
         if not candidate_id:
 
             st.error(
@@ -763,9 +1069,11 @@ if not st.session_state.started:
                     timeout=30,
                 )
 
+
                 if response.status_code == 200:
 
                     data = response.json()
+
 
                     if data.get("resume_available"):
 
@@ -775,6 +1083,7 @@ if not st.session_state.started:
                             )
                         )
 
+
                         st.session_state.question = (
                             data.get(
                                 "question",
@@ -782,12 +1091,14 @@ if not st.session_state.started:
                             )
                         )
 
+
                         st.session_state.round = (
                             data.get(
                                 "round",
                                 1,
                             )
                         )
+
 
                         st.session_state.started = True
 
@@ -797,11 +1108,26 @@ if not st.session_state.started:
 
                         st.session_state.final_report = ""
 
+                        st.session_state.interview_audio_frames = []
+
+                        st.session_state.interview_video_path = ""
+
+                        st.session_state.video_analysis = None
+
+
+                        # Clear previous video recording ID.
+
+                        if "video_recording_id" in st.session_state:
+
+                            del st.session_state.video_recording_id
+
+
                         st.success(
                             "Interview resumed!"
                         )
 
                         st.rerun()
+
 
                     else:
 
@@ -812,6 +1138,7 @@ if not st.session_state.started:
                             )
                         )
 
+
                 elif response.status_code == 401:
 
                     st.error(
@@ -820,11 +1147,13 @@ if not st.session_state.started:
 
                     handle_unauthorized()
 
+
                 elif response.status_code == 403:
 
                     st.error(
                         "You are not authorized to access this interview."
                     )
+
 
                 else:
 
@@ -833,12 +1162,12 @@ if not st.session_state.started:
                         f"{response.text}"
                     )
 
+
             except requests.RequestException as e:
 
                 st.error(
                     f"Could not connect to FastAPI: {e}"
                 )
-
 
 # ============================================================
 # INTERVIEW HISTORY
@@ -848,6 +1177,7 @@ st.divider()
 
 st.header("📊 Interview History")
 
+
 if st.button(
     "Load Interview History",
     use_container_width=True,
@@ -856,6 +1186,7 @@ if st.button(
     candidate_id = (
         st.session_state.candidate_id
     )
+
 
     if not candidate_id:
 
@@ -873,6 +1204,7 @@ if st.button(
                 timeout=30,
             )
 
+
             if response.status_code == 200:
 
                 data = response.json()
@@ -882,11 +1214,13 @@ if st.button(
                     [],
                 )
 
+
                 if not interviews:
 
                     st.info(
                         "No interview history found."
                     )
+
 
                 else:
 
@@ -896,30 +1230,147 @@ if st.button(
                             f"Interview #{interview['interview_id']}"
                         )
 
+
                         st.write(
                             f"Role: {interview['role']}"
                         )
+
 
                         st.write(
                             f"Difficulty: {interview['difficulty']}"
                         )
 
+
                         st.write(
                             f"Type: {interview['interview_type']}"
                         )
+
 
                         st.write(
                             f"Status: {interview['status']}"
                         )
 
+
                         st.write(
                             f"Rounds: {interview['max_rounds']}"
                         )
+
+
+                        # ========================================
+                        # VIDEO ANALYSIS HISTORY
+                        # ========================================
+
+                        video_analysis = interview.get(
+                            "video_analysis"
+                        )
+
+
+                        if video_analysis:
+
+                            st.markdown(
+                                "### 🎥 Video Analysis"
+                            )
+
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+
+                                visibility = (
+                                    video_analysis.get(
+                                        "face_visibility_percentage"
+                                    )
+                                )
+
+                                if visibility is not None:
+
+                                    st.write(
+                                        f"**Face Visibility:** "
+                                        f"{visibility}%"
+                                    )
+
+                                duration = (
+                                    video_analysis.get(
+                                        "duration_seconds"
+                                    )
+                                )
+
+                                if duration is not None:
+
+                                    st.write(
+                                        f"**Duration:** "
+                                        f"{duration} sec"
+                                    )
+
+                                fps = (
+                                    video_analysis.get(
+                                        "fps"
+                                    )
+                                )
+
+                                if fps is not None:
+
+                                    st.write(
+                                        f"**FPS:** "
+                                        f"{fps}"
+                                    )
+
+                            with col2:
+
+                                width = (
+                                    video_analysis.get(
+                                        "width"
+                                    )
+                                )
+
+                                height = (
+                                    video_analysis.get(
+                                        "height"
+                                    )
+                                )
+
+                                if width and height:
+
+                                    st.write(
+                                        f"**Resolution:** "
+                                        f"{width} × {height}"
+                                    )
+
+                                analyzed_frames = (
+                                    video_analysis.get(
+                                        "analyzed_frames"
+                                    )
+                                )
+
+                                if analyzed_frames is not None:
+
+                                    st.write(
+                                        f"**Frames Analyzed:** "
+                                        f"{analyzed_frames}"
+                                    )
+
+                                face_frames = (
+                                    video_analysis.get(
+                                        "face_detected_frames"
+                                    )
+                                )
+
+                                if face_frames is not None:
+
+                                    st.write(
+                                        f"**Face Detected Frames:** "
+                                        f"{face_frames}"
+                                    )
+
+
+                        # ========================================
+                        # ANSWERS
+                        # ========================================
 
                         answers = interview.get(
                             "answers",
                             [],
                         )
+
 
                         for item in answers:
 
@@ -935,6 +1386,7 @@ if st.button(
                                     item["question"]
                                 )
 
+
                                 st.markdown(
                                     "**Answer**"
                                 )
@@ -942,6 +1394,7 @@ if st.button(
                                 st.write(
                                     item["answer"]
                                 )
+
 
                                 st.markdown(
                                     "**AI Feedback**"
@@ -954,9 +1407,15 @@ if st.button(
                                     )
                                 )
 
+
+                        # ========================================
+                        # FINAL REPORT
+                        # ========================================
+
                         final_report = interview.get(
                             "final_report"
                         )
+
 
                         if final_report:
 
@@ -968,7 +1427,9 @@ if st.button(
                                 final_report
                             )
 
+
                         st.divider()
+
 
             elif response.status_code == 401:
 
@@ -978,11 +1439,13 @@ if st.button(
 
                 handle_unauthorized()
 
+
             elif response.status_code == 403:
 
                 st.error(
                     "You are not authorized to access this history."
                 )
+
 
             else:
 
@@ -990,6 +1453,7 @@ if st.button(
                     f"API Error {response.status_code}: "
                     f"{response.text}"
                 )
+
 
         except requests.RequestException as e:
 

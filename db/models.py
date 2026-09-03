@@ -6,6 +6,7 @@ from sqlalchemy import (
     Text,
     DateTime,
     ForeignKey,
+    Float,
 )
 
 from sqlalchemy.orm import declarative_base
@@ -17,8 +18,16 @@ import os
 from dotenv import load_dotenv
 
 
+# ============================================================
+# ENVIRONMENT
+# ============================================================
+
 load_dotenv()
 
+
+# ============================================================
+# DATABASE CONFIGURATION
+# ============================================================
 
 DATABASE_URL = (
     f"postgresql+psycopg://"
@@ -36,8 +45,16 @@ engine = create_engine(
 )
 
 
+# ============================================================
+# BASE
+# ============================================================
+
 Base = declarative_base()
 
+
+# ============================================================
+# CANDIDATE
+# ============================================================
 
 class Candidate(Base):
 
@@ -71,6 +88,10 @@ class Candidate(Base):
         default=datetime.utcnow,
     )
 
+
+# ============================================================
+# INTERVIEW
+# ============================================================
 
 class Interview(Base):
 
@@ -117,11 +138,59 @@ class Interview(Base):
         nullable=True,
     )
 
+    # ========================================================
+    # VIDEO ANALYSIS
+    # ========================================================
+
+    video_path = Column(
+        Text,
+        nullable=True,
+    )
+
+    video_duration_seconds = Column(
+        Float,
+        nullable=True,
+    )
+
+    video_fps = Column(
+        Float,
+        nullable=True,
+    )
+
+    video_width = Column(
+        Integer,
+        nullable=True,
+    )
+
+    video_height = Column(
+        Integer,
+        nullable=True,
+    )
+
+    video_analyzed_frames = Column(
+        Integer,
+        nullable=True,
+    )
+
+    face_detected_frames = Column(
+        Integer,
+        nullable=True,
+    )
+
+    face_visibility_percentage = Column(
+        Float,
+        nullable=True,
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow,
     )
 
+
+# ============================================================
+# INTERVIEW ANSWER
+# ============================================================
 
 class InterviewAnswer(Base):
 
